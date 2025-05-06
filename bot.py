@@ -35,7 +35,7 @@ logging.info("Bot avviato con successo!")
 
 def qr_white(message):
 
-    bot.send_message(message.chat.id, "Inviami un link e creerò un QR code per te!")
+    bot.send_message(message.chat.id, "Inviami un link")
 
     @bot.message_handler(func=lambda m: True)
     def create_qr(message):
@@ -70,7 +70,7 @@ def qr_white(message):
 
 def qr_blue(message):
 
-    bot.send_message(message.chat.id, "Inviami un link e creerò un QR code per te!")
+    bot.send_message(message.chat.id, "Inviami un link")
 
     @bot.message_handler(func=lambda m: True)
     def create_qr(message):
@@ -135,7 +135,7 @@ def callback_query(call):
 @bot.message_handler(commands=['start']) 
 def send_welcome(message):
 
-    bot.send_message(message.chat.id, "Benvenuto! Sono il tuo bot per creare QR code personalizzati targati HKN🤳")
+    bot.send_message(message.chat.id, "Benvenuto! Sono il bot per creare QR code personalizzati targati HKN🤳")
 
     # Creazione dei bottoni
     keyboard = {
@@ -150,7 +150,7 @@ def send_welcome(message):
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
 
-    bot.send_message(message.chat.id, "Sorry, I didn't understand that command.")
+    bot.send_message(message.chat.id, "Scusami, non ho capito il comando.")
     send_welcome(message)
 
 
