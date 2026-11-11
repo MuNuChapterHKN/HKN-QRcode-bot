@@ -13,6 +13,23 @@ LOGO_URL_B = "https://hknpolito.org/directus/assets/50024bd5-76ba-43f8-b058-e6d2
 QR_COLOR = "#3c506e"
 BG_COLOR = "#061e33" 
 
+QR_STYLES = {
+    "white": {
+        "logo": LOGO_URL_B,
+        "logoMode": "clean",
+        "bodyColor": QR_COLOR,
+        "eye1Color": QR_COLOR, "eye2Color": QR_COLOR, "eye3Color": QR_COLOR,
+        "eyeBall1Color": QR_COLOR, "eyeBall2Color": QR_COLOR, "eyeBall3Color": QR_COLOR,
+    },
+    "blue": {
+        "logo": LOGO_URL_W,
+        "logoMode": "clean",
+        "bodyColor": "#ffffff",
+        "eye1Color": "#ffffff", "eye2Color": "#ffffff", "eye3Color": "#ffffff",
+        "eyeBall1Color": "#ffffff", "eyeBall2Color": "#ffffff", "eyeBall3Color": "#ffffff",
+        "bgColor": BG_COLOR,
+    },
+}
 
 # Logging (utile per il debug)
 logging.basicConfig(
@@ -33,30 +50,19 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 logging.info("Bot avviato con successo!")
 
 
-def qr_white(message):
+def qr(message, color):
 
     bot.send_message(message.chat.id, "Inviami un link")
 
-    @bot.message_handler(func=lambda m: True)
     def create_qr(message):
         text = message.text.strip()
 
         payload = {
             "data": text,
-            "config": {
-                "logo": LOGO_URL_B,
-                "logoMode": "clean",
-                "bodyColor": QR_COLOR,
-                "eye1Color": QR_COLOR,
-                "eye2Color": QR_COLOR,
-                "eye3Color": QR_COLOR,
-                "eyeBall1Color": QR_COLOR,
-                "eyeBall2Color": QR_COLOR,
-                "eyeBall3Color": QR_COLOR,
-            },
+            "config": QR_STYLES[color],
             "size": 1000,
             "download": False,
-            "file": "png"
+            "file": "png",
         }
 
         r = requests.post(QR_API_URL, json=payload)
@@ -65,41 +71,6 @@ def qr_white(message):
         bot.send_photo(message.chat.id, r.content, caption="Ecco il tuo QR code!")
         keyboard = {"Crea un altro QR code": "new_qr"}
         bot.send_message(message.chat.id, "Se vuoi crearne un altro, premi il pulsante qui sotto!", reply_markup=gen_markup(keyboard, 1))
-
-    bot.register_next_step_handler(message, create_qr)
-
-def qr_blue(message):
-
-    bot.send_message(message.chat.id, "Inviami un link")
-
-    @bot.message_handler(func=lambda m: True)
-    def create_qr(message):
-        text = message.text.strip()
-
-        payload = {
-            "data": text,
-            "config": {
-                "logo": LOGO_URL_W,
-                "logoMode": "clean",
-                "bodyColor": "#ffffff",
-                "eye1Color": "#ffffff",
-                "eye2Color": "#ffffff",
-                "eye3Color": "#ffffff",
-                "eyeBall1Color": "#ffffff",
-                "eyeBall2Color": "#ffffff",
-                "eyeBall3Color": "#ffffff",
-                "bgColor": BG_COLOR,
-            },
-            "size": 1000,
-            "download": False,
-            "file": "png"
-        }
-
-        r = requests.post(QR_API_URL, json=payload)
-
-        bot.send_message(message.chat.id, "L'area IT ha cucinato👨🏻‍🍳")
-        bot.send_photo(message.chat.id, r.content, caption="Ecco il tuo QR code!")
-        bot.send_message(message.chat.id, "Se vuoi crearne un altro, premi il pulsante qui sotto!", reply_markup=gen_markup({"Crea un altro QR code": "new_qr"}, 1))
 
     bot.register_next_step_handler(message, create_qr)
 
@@ -112,7 +83,7 @@ def callback_query(call):
         }
         reply_markup = gen_markup(keyboard, 2)
         bot.edit_message_reply_markup(chat_id = call.message.chat.id, message_id = call.message.message_id, reply_markup=reply_markup)
-        qr_white(call.message)
+        qr(call.message, call.data)
     elif call.data == "blue":
         keyboard = {
             "Sfondo Bianco": "pass",
@@ -120,7 +91,7 @@ def callback_query(call):
         }
         reply_markup = gen_markup(keyboard, 2)
         bot.edit_message_reply_markup(chat_id = call.message.chat.id, message_id = call.message.message_id, reply_markup=reply_markup)
-        qr_blue(call.message)
+        qr(call.message, call.data)
     elif call.data == "new_qr":
         keyboard = {"Creazione in corso...": "pass"}
         reply_markup = gen_markup(keyboard, 1)
