@@ -1,34 +1,44 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import io
 import logging
-import requests
+import math
 import os
+from urllib.parse import urlparse
+
+import qrcode
+from qrcode.exceptions import DataOverflowError
+from PIL import Image, ImageDraw
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Configurazione
-QR_API_URL = "https://api.qrcode-monkey.com/qr/custom"
-LOGO_URL_W = "https://hknpolito.org/directus/assets/149f57c9-e3c6-4680-ae08-7fa7b83bef4a.png"  
-LOGO_URL_B = "https://hknpolito.org/directus/assets/50024bd5-76ba-43f8-b058-e6d2aeb3b2cb.png"
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 QR_COLOR = "#3c506e"
-BG_COLOR = "#061e33" 
+BG_COLOR = "#061e33"
+QR_SIZE = 1000      # lato del QR in pixel, margine escluso
+QR_BORDER = 2       # margine attorno al QR, in moduli (come QRCode Monkey)
+LOGO_RATIO = 0.28   # lato del logo rispetto al lato del QR
+
+INVALID_LINK_MSG = (
+    "Il link non è valido😭😭😭\n"
+    "Inserisci un indirizzo completo che inizi con http:// o https://, ad esempio:\n\n"
+    "-> https://hknpolito.org"
+)
+TOO_LONG_MSG = "Il link è troppo lungo per stare in un QR code 😕 Mandamene uno più corto."
+ERROR_MSG = "Qualcosa è andato storto durante la creazione del QR code 😕 Riprova con /start."
+
+
+def load_logo(filename):
+    # carica il logo dalla cartella assets e lo ritaglia sul contenuto (toglie i bordi trasparenti)
+    with Image.open(os.path.join(ASSETS_DIR, filename)) as img:
+        logo = img.convert("RGBA")
+    return logo.crop(logo.getbbox())
+
 
 QR_STYLES = {
-    "white": {
-        "logo": LOGO_URL_B,
-        "logoMode": "clean",
-        "bodyColor": QR_COLOR,
-        "eye1Color": QR_COLOR, "eye2Color": QR_COLOR, "eye3Color": QR_COLOR,
-        "eyeBall1Color": QR_COLOR, "eyeBall2Color": QR_COLOR, "eyeBall3Color": QR_COLOR,
-    },
-    "blue": {
-        "logo": LOGO_URL_W,
-        "logoMode": "clean",
-        "bodyColor": "#ffffff",
-        "eye1Color": "#ffffff", "eye2Color": "#ffffff", "eye3Color": "#ffffff",
-        "eyeBall1Color": "#ffffff", "eyeBall2Color": "#ffffff", "eyeBall3Color": "#ffffff",
-        "bgColor": BG_COLOR,
-    },
+    "white": {"fg": QR_COLOR, "bg": "#ffffff", "logo": load_logo("logo_blue.png")},
+    "blue": {"fg": "#ffffff", "bg": BG_COLOR, "logo": load_logo("logo_white.png")},
 }
 
 # Logging (utile per il debug)
@@ -45,6 +55,53 @@ def gen_markup(dict, n):
     return markup
 
 
+def make_qr(data, style):
+    # genera il QR code con il logo al centro e lo restituisce come PNG in memoria
+    qr_code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H, border=QR_BORDER)
+    qr_code.add_data(data)
+    try:
+        qr_code.make(fit=True)  # sceglie la versione più piccola che contiene il link
+    except ValueError as exc:
+        # qrcode 8.2 segnala i dati troppo lunghi con ValueError("Invalid version (was 41, ...)")
+        raise DataOverflowError(str(exc)) from exc
+
+    modules = qr_code.modules_count
+    box = max(1, QR_SIZE // modules)  # lato di un modulo in pixel
+    qr_code.box_size = box
+    img = qr_code.make_image(fill_color=style["fg"], back_color=style["bg"]).convert("RGBA")
+
+    clean = math.ceil(modules * LOGO_RATIO)
+    if (modules - clean) % 2:
+        clean += 1  # stessa parità del QR, così l'area è perfettamente centrata
+    start = (QR_BORDER + (modules - clean) // 2) * box
+    end = start + clean * box
+    ImageDraw.Draw(img).rectangle([start, start, end - 1, end - 1], fill=style["bg"])
+
+    # logo ridimensionato e incollato al centro dell'area pulita
+    logo = style["logo"].copy()
+    side = round(modules * box * LOGO_RATIO)
+    logo.thumbnail((side, side), Image.Resampling.LANCZOS)
+    img.paste(logo, (start + (end - start - logo.width) // 2, start + (end - start - logo.height) // 2), logo)
+
+    output = io.BytesIO()
+    img.convert("RGB").save(output, format="PNG")
+    output.seek(0)
+    output.name = "qr.png"
+    return output
+
+
+def is_valid_link(text):
+    # True se il testo è un link http/https con un dominio, es. https://hknpolito.org
+    if not text or any(c.isspace() for c in text):
+        return False
+    try:
+        parsed = urlparse(text)
+        host = parsed.hostname
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and bool(host) and "." in host
+
+
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode=None)
 
 logging.info("Bot avviato con successo!")
@@ -52,23 +109,34 @@ logging.info("Bot avviato con successo!")
 
 def qr(message, color):
 
-    bot.send_message(message.chat.id, "Inviami un link")
+    bot.send_message(message.chat.id, "Inserisci un link valido")
 
     def create_qr(message):
-        text = message.text.strip()
+        text = (message.text or "").strip()  # foto, sticker, ecc. non hanno testo
 
-        payload = {
-            "data": text,
-            "config": QR_STYLES[color],
-            "size": 1000,
-            "download": False,
-            "file": "png",
-        }
+        # Un comando (es. /start) annulla l'attesa del link e riporta al menu
+        if text.startswith("/"):
+            send_welcome(message)
+            return
 
-        r = requests.post(QR_API_URL, json=payload)
+        if not is_valid_link(text):
+            bot.send_message(message.chat.id, INVALID_LINK_MSG)
+            bot.register_next_step_handler(message, create_qr)  # aspetta un nuovo tentativo
+            return
 
-        bot.send_message(message.chat.id, "L'area IT ha cucinato👨🏻‍🍳")
-        bot.send_photo(message.chat.id, r.content, caption="Ecco il tuo QR code!")
+        try:
+            image = make_qr(text, QR_STYLES[color])
+            bot.send_message(message.chat.id, "QR code generato con successo!")
+            bot.send_photo(message.chat.id, image)
+        except DataOverflowError:
+            bot.send_message(message.chat.id, TOO_LONG_MSG)
+            bot.register_next_step_handler(message, create_qr)
+            return
+        except Exception:
+            logging.exception("Errore durante la creazione o l'invio del QR code")
+            bot.send_message(message.chat.id, ERROR_MSG)
+            return
+
         keyboard = {"Crea un altro QR code": "new_qr"}
         bot.send_message(message.chat.id, "Se vuoi crearne un altro, premi il pulsante qui sotto!", reply_markup=gen_markup(keyboard, 1))
 
