@@ -17,6 +17,7 @@ WORKDIR /app
 # Copia i file
 COPY requirements.txt .
 COPY bot.py .
+COPY assets/ assets/
 
 # Installa i pacchetti Python
 RUN pip install --no-cache-dir -r requirements.txt
